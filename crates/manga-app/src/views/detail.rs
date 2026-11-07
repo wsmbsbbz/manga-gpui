@@ -98,13 +98,16 @@ impl Render for DetailView {
             _ => "开始阅读".into(),
         };
 
+        // Prefer the loaded title (the passed-in summary may be a stub, e.g.
+        // when resuming from history or a debug route).
+        let title = self.detail.as_ref().map(|d| d.summary.title.clone()).unwrap_or_else(|| self.comic.title.clone());
         let mut info = div().flex_1().min_w_0().flex().flex_col().gap(space::s3()).child(
             div()
                 .text_size(text::display())
                 .font_weight(FontWeight::BOLD)
                 .text_color(c.text)
                 .line_clamp(2)
-                .child(self.comic.title.clone()),
+                .child(title),
         );
         if let Some(d) = &self.detail {
             for (k, v) in &d.meta {

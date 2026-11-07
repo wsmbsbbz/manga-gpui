@@ -20,6 +20,9 @@ pub struct AppConfig {
     pub preload_ahead: usize,
     pub disk_cache_mb: u64,
     pub memory_budget_mb: u64,
+    /// CopyManga API host override (mirrors change over time). `None` uses the
+    /// source's built-in default.
+    pub copy_api_host: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -30,6 +33,7 @@ impl Default for AppConfig {
             preload_ahead: 5,
             disk_cache_mb: 1024,
             memory_budget_mb: 384,
+            copy_api_host: None,
         }
     }
 }

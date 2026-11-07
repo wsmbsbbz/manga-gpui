@@ -1,6 +1,8 @@
 # manga-gpui
 
-用 [gpui-kit](https://github.com/longbridge/gpui-kit)（GPUI）写的桌面漫画阅读器。第一版支持本地书库。站点源通过 `ComicSource` trait 接入，拷贝漫画的接入说明见 [handoff/copymanga/README.md](handoff/copymanga/README.md)。
+用 [gpui-kit](https://github.com/longbridge/gpui-kit)（GPUI）写的桌面漫画阅读器。支持本地书库和拷贝漫画站点源，左下角「来源」切换。站点源通过 `ComicSource` trait 接入。
+
+> 本项目用于研究 GPUI，仅本地个人使用、不做分发。拷贝漫画源是非官方客户端，多半不符合站点服务条款，请自行斟酌。它按公开的社区配置构造请求头，不涉及账号密钥；客户端保持克制（每进程固定设备标识、不做抓取循环、尊重服务端限流）。
 
 ## 运行
 
@@ -33,7 +35,14 @@ MANGA_LIBRARY=/tmp/demo-library cargo run
 |---|---|
 | `MANGA_LIBRARY` | 覆盖已保存的书库路径 |
 | `MANGA_READER_MODE` | `scroll` / `ltr` / `rtl` |
-| `MANGA_DEBUG_ROUTE` | 启动时直接打开页面：`<漫画>`、`<漫画>/<章节>/<页>`，或 `@history`、`@search` |
+| `MANGA_DEBUG_ROUTE` | 启动时直接打开页面：`<漫画>`、`<漫画>/<章节>/<页>`，或 `@history`、`@search`（`<漫画>` 取当前来源） |
+| `MANGA_SOURCE` | 启动时选中的来源：`local` / `copy_manga` |
+| `MANGA_COPY_API` | 覆盖拷贝漫画 API 域名（镜像会变） |
+| `MANGA_COPY_TOKEN` | 可选，已有的登录 token（本应用不实现登录流程） |
+
+### 拷贝漫画源
+
+左下角「来源」选「拷贝漫画」。书架显示最近更新（最多 5 页），用搜索查找具体作品。实现范围：浏览 / 搜索 / 详情 / 阅读；登录和收藏未实现。API 域名默认 `api.copy2000.online`，失效时用 `MANGA_COPY_API` 或配置文件 `copy_api_host` 指定新镜像。请求签名方案见 [`crates/manga-source-copy/src/sign.rs`](crates/manga-source-copy/src/sign.rs) 顶部说明。
 
 ## 阅读器
 
@@ -97,7 +106,7 @@ cargo test --workspace
 - 书库扫描结果有缓存。根目录增删漫画会自动重新扫描；改动漫画文件夹内部（例如新增章节）需要点「刷新」。
 
 代码审查中暂缓到后续版本的项：
-- 来源切换、按 `Capabilities` 隐藏不支持的功能、运行时可配置的 `SourceKey`（接入站点源时一起做）。
+- 拷贝漫画的登录与收藏（现仅浏览/搜索/详情/阅读）；运行时可配置的 `SourceKey`（现为内置两源的静态 key）。
 - 书库内符号链接的规范化。
 - 详情页章节列表虚拟化（章节数上千时再做）。
 - 搜索结果分页。

@@ -1,7 +1,7 @@
 use std::{rc::Rc, sync::Arc};
 
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use manga_core::{ComicSource, ComicSummary};
+use manga_core::ComicSummary;
 
 use super::Nav;
 use crate::{
@@ -11,14 +11,16 @@ use crate::{
 };
 
 enum Load {
-    Idle,
+    /// Local source with no folder chosen yet.
+    NeedsFolder,
     Loading,
     Ready,
     Failed(SharedString),
 }
 
-/// Browse listing of the active source (the local library for now).
+/// Browse listing of the selected source.
 pub struct LibraryView {
+    source_key: String,
     comics: Arc<Vec<ComicSummary>>,
     load: Load,
     scroll: UniformListScrollHandle,
@@ -28,27 +30,48 @@ pub struct LibraryView {
 impl EventEmitter<Nav> for LibraryView {}
 
 impl LibraryView {
-    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut this =
-            Self { comics: Arc::default(), load: Load::Idle, scroll: UniformListScrollHandle::new(), _task: None };
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let mut this = Self {
+            source_key: manga_source_local::KEY.to_string(),
+            comics: Arc::default(),
+            load: Load::Loading,
+            scroll: UniformListScrollHandle::new(),
+            _task: None,
+        };
         this.reload(cx);
         this
     }
 
-    fn source(cx: &App) -> Arc<dyn ComicSource> {
-        AppState::get(cx).local.clone()
+    pub fn set_source(&mut self, key: String, cx: &mut Context<Self>) {
+        if key == self.source_key {
+            return;
+        }
+        self.source_key = key;
+        self.comics = Arc::default();
+        self.scroll = UniformListScrollHandle::new();
+        self.reload(cx);
+    }
+
+    fn is_local(&self) -> bool {
+        self.source_key == manga_source_local::KEY
     }
 
     pub fn reload(&mut self, cx: &mut Context<Self>) {
-        if AppState::get(cx).local.root().is_none() {
-            self.load = Load::Idle;
+        let Some(source) = AppState::source(cx, &self.source_key) else {
+            self.load = Load::Failed("来源不可用".into());
+            cx.notify();
+            return;
+        };
+        // The local source needs a folder before it can list anything.
+        if self.is_local() && AppState::get(cx).local.root().is_none() {
+            self.load = Load::NeedsFolder;
             cx.notify();
             return;
         }
         self.load = Load::Loading;
-        let source = Self::source(cx);
         self._task = Some(cx.spawn(async move |this, cx| {
-            // Local listings are cheap; load every page up front.
+            // Loops until `has_more` is false. Remote sources bound this
+            // themselves (explore caps the page count); local is cheap.
             let mut all = Vec::new();
             let mut page = 1;
             let result = loop {
@@ -95,33 +118,42 @@ impl LibraryView {
         })
         .detach();
     }
+
+    fn title(&self, cx: &App) -> SharedString {
+        AppState::source(cx, &self.source_key).map(|s| s.meta().name.into()).unwrap_or_else(|| "书架".into())
+    }
 }
 
 impl Render for LibraryView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors();
-        let root = AppState::get(cx).local.root();
-        let subtitle = match (&self.load, &root) {
-            (Load::Ready, Some(r)) => Some(format!("{} 部 · {}", self.comics.len(), r.display()).into()),
-            (_, Some(r)) => Some(r.display().to_string().into()),
-            _ => None,
+        let subtitle: Option<SharedString> = if self.is_local() {
+            AppState::get(cx).local.root().map(|r| r.display().to_string().into())
+        } else if matches!(self.load, Load::Ready) {
+            Some(format!("{} 部", self.comics.len()).into())
+        } else {
+            None
         };
-        let header = ui::page_header("书架", subtitle).child(
+        let header = ui::page_header(self.title(cx), subtitle).child(
             div()
                 .flex()
                 .gap(space::s2())
-                .when(root.is_some(), |d| {
-                    d.child(ui::button("refresh", "刷新").on_click(cx.listener(|this, _, _, cx| {
+                .child(ui::button("refresh", "刷新").on_click(cx.listener(|this, _, _, cx| {
+                    if this.is_local() {
                         AppState::get(cx).local.invalidate();
-                        this.reload(cx)
-                    })))
-                })
-                .child(ui::button("pick", "选择文件夹").on_click(cx.listener(|this, _, _, cx| this.pick_folder(cx)))),
+                    }
+                    this.reload(cx)
+                })))
+                .when(self.is_local(), |d| {
+                    d.child(
+                        ui::button("pick", "选择文件夹").on_click(cx.listener(|this, _, _, cx| this.pick_folder(cx))),
+                    )
+                }),
         );
 
         let available_w = f32::from(window.viewport_size().width) - f32::from(layout::sidebar_w());
         let body: AnyElement = match &self.load {
-            Load::Idle => ui::empty_state(
+            Load::NeedsFolder => ui::empty_state(
                 "还没有书库",
                 "选择一个存放漫画的文件夹。每个子文件夹是一部漫画，其中的子文件夹或 .cbz 是章节。",
             )
@@ -137,18 +169,16 @@ impl Render for LibraryView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(ui::spinner_label("正在扫描书库…"))
+                .child(ui::spinner_label("正在加载…"))
                 .into_any_element(),
             Load::Failed(e) => ui::empty_state("加载失败", e.clone()).into_any_element(),
-            _ if self.comics.is_empty() => {
-                ui::empty_state("书库是空的", "文件夹里没有找到漫画图片或 .cbz 文件。").into_any_element()
-            }
+            _ if self.comics.is_empty() => ui::empty_state("这里是空的", "没有找到任何漫画。").into_any_element(),
             _ => {
                 let weak = cx.weak_entity();
+                let key = self.source_key.clone();
                 let on_open: ui::OnComic = Rc::new(move |comic, _, cx| {
-                    let _ = weak.update(cx, |_, cx| {
-                        cx.emit(Nav::OpenComic { source: manga_source_local::KEY.into(), comic: comic.clone() })
-                    });
+                    let (key, comic) = (key.clone(), comic.clone());
+                    let _ = weak.update(cx, |_, cx| cx.emit(Nav::OpenComic { source: key, comic }));
                 });
                 let pipeline = AppState::get(cx).covers.clone();
                 ui::comic_grid("library-grid", self.comics.clone(), available_w, self.scroll.clone(), pipeline, on_open)

@@ -1,0 +1,17 @@
+[package]
+name = "manga-source-copy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+manga-core.workspace = true
+manga-net.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+log.workspace = true
+sha2.workspace = true
+hmac = "0.12"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }

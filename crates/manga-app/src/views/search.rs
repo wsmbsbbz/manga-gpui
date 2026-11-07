@@ -21,6 +21,7 @@ enum Phase {
 }
 
 pub struct SearchView {
+    source_key: String,
     input: Entity<InputState>,
     results: Arc<Vec<ComicSummary>>,
     phase: Phase,
@@ -42,6 +43,7 @@ impl SearchView {
             }
         });
         Self {
+            source_key: manga_source_local::KEY.to_string(),
             input,
             results: Arc::default(),
             phase: Phase::Idle,
@@ -52,16 +54,30 @@ impl SearchView {
         }
     }
 
+    pub fn set_source(&mut self, key: String, cx: &mut Context<Self>) {
+        if key == self.source_key {
+            return;
+        }
+        self.source_key = key;
+        self.results = Arc::default();
+        self.phase = Phase::Idle;
+        cx.notify();
+    }
+
     fn run(&mut self, query: String, cx: &mut Context<Self>) {
         let query = query.trim().to_string();
         if query.is_empty() {
             return;
         }
+        let Some(source) = AppState::source(cx, &self.source_key) else {
+            self.phase = Phase::Failed("来源不可用".into());
+            cx.notify();
+            return;
+        };
         self.last_query = query.clone();
         self.phase = Phase::Searching;
-        let source = AppState::get(cx).local.clone();
         self._task = Some(cx.spawn(async move |this, cx| {
-            let r = manga_core::ComicSource::search(&*source, &query, 1).await;
+            let r = source.search(&query, 1).await;
             let _ = this.update(cx, |this, cx| {
                 match r {
                     Ok(p) => {
@@ -86,7 +102,7 @@ impl Render for SearchView {
         };
         let available_w = f32::from(window.viewport_size().width) - f32::from(layout::sidebar_w());
         let body: AnyElement = match &self.phase {
-            Phase::Idle => ui::empty_state("搜索书库", "输入书名的一部分即可，不区分大小写。").into_any_element(),
+            Phase::Idle => ui::empty_state("搜索", "输入书名后按回车。").into_any_element(),
             Phase::Searching => div()
                 .size_full()
                 .flex()
@@ -100,10 +116,10 @@ impl Render for SearchView {
             }
             Phase::Done => {
                 let weak = cx.weak_entity();
+                let key = self.source_key.clone();
                 let on_open: ui::OnComic = Rc::new(move |comic, _, cx| {
-                    let _ = weak.update(cx, |_, cx| {
-                        cx.emit(Nav::OpenComic { source: manga_source_local::KEY.into(), comic: comic.clone() })
-                    });
+                    let (key, comic) = (key.clone(), comic.clone());
+                    let _ = weak.update(cx, |_, cx| cx.emit(Nav::OpenComic { source: key, comic }));
                 });
                 ui::comic_grid(
                     "search-grid",

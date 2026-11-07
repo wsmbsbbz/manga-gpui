@@ -51,6 +51,9 @@ pub struct Capabilities {
     /// Whether fetched image bytes should go to the disk cache. Local files
     /// are already on disk and set this to `false`.
     pub cache_images: bool,
+    /// Browse one page at a time (remote sources) rather than loading the
+    /// whole listing up front (local folders).
+    pub incremental_browse: bool,
 }
 
 #[derive(Debug, Clone)]

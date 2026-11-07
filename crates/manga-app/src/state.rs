@@ -3,6 +3,7 @@ use std::sync::{Arc, mpsc};
 use gpui_kit::{App, AppContext, Entity, Global};
 use manga_core::{ComicSource, SourceRegistry};
 use manga_net::{ImageFetcher, Runtime};
+use manga_source_copy::CopySource;
 use manga_source_local::LocalSource;
 use manga_store::{AppConfig, DiskCache, History, HistoryEntry, app_dirs};
 
@@ -54,7 +55,13 @@ impl AppState {
         let local = Arc::new(LocalSource::new(config.library_root.clone(), runtime.clone()));
         let mut registry = SourceRegistry::default();
         registry.register(local.clone() as Arc<dyn ComicSource>);
-        // Future sources register here, e.g. a website source crate.
+
+        // CopyManga website source (unofficial, local/research use). The host
+        // can be overridden by env for when the default mirror changes.
+        let copy_host = std::env::var("MANGA_COPY_API").ok().or_else(|| config.copy_api_host.clone());
+        let copy_token = std::env::var("MANGA_COPY_TOKEN").ok();
+        let copy = Arc::new(CopySource::new(runtime.clone(), copy_host, copy_token));
+        registry.register(copy as Arc<dyn ComicSource>);
 
         let mb = 1024 * 1024;
         let covers = cx.new(|_| ImagePipeline::new(fetcher.clone(), 420, 96 * mb));

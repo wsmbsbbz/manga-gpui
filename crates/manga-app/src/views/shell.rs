@@ -15,7 +15,7 @@ fn debug_route() -> Option<Nav> {
     let mut parts = route.splitn(3, '/');
     let id = parts.next()?.to_string();
     let comic = manga_core::ComicSummary { id: id.clone(), title: id, subtitle: None, cover: None, tags: vec![] };
-    let source = manga_source_local::KEY.to_string();
+    let source = std::env::var("MANGA_SOURCE").unwrap_or_else(|_| manga_source_local::KEY.to_string());
     Some(match parts.next() {
         None => Nav::OpenComic { source, comic },
         Some(chapter_id) => Nav::Resume {
@@ -48,6 +48,8 @@ struct Overlay {
 /// Window root: sidebar + active tab, with detail and reader stacked on top.
 pub struct Shell {
     tab: Tab,
+    /// Key of the source the Library and Search tabs browse.
+    source: String,
     stack: Vec<Overlay>,
     library: Entity<LibraryView>,
     search: Entity<SearchView>,
@@ -57,7 +59,7 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let library = cx.new(|cx| LibraryView::new(window, cx));
+        let library = cx.new(LibraryView::new);
         let search = cx.new(|cx| SearchView::new(window, cx));
         let history = cx.new(HistoryView::new);
         let subs = vec![
@@ -75,7 +77,28 @@ impl Shell {
                 }
             }
         }
-        Self { tab, stack: vec![], library, search, history, _tab_subs: subs }
+        // Dev hook: start on a given source (e.g. MANGA_SOURCE=copy_manga).
+        let source = std::env::var("MANGA_SOURCE")
+            .ok()
+            .filter(|k| AppState::get(cx).registry.get(k).is_some())
+            .unwrap_or_else(|| manga_source_local::KEY.to_string());
+        if source != manga_source_local::KEY {
+            library.update(cx, |v, cx| v.set_source(source.clone(), cx));
+            search.update(cx, |v, cx| v.set_source(source.clone(), cx));
+        }
+        Self { tab, source, stack: vec![], library, search, history, _tab_subs: subs }
+    }
+
+    fn select_source(&mut self, key: &'static str, cx: &mut Context<Self>) {
+        if self.source == key {
+            return;
+        }
+        self.source = key.to_string();
+        self.stack.clear();
+        self.library.update(cx, |v, cx| v.set_source(key.into(), cx));
+        self.search.update(cx, |v, cx| v.set_source(key.into(), cx));
+        self.tab = Tab::Library;
+        cx.notify();
     }
 
     fn navigate(&mut self, nav: Nav, window: &mut Window, cx: &mut Context<Self>) {
@@ -192,7 +215,38 @@ impl Shell {
                     .child(self.nav_item("nav-hist", "◷", "历史", Tab::History, cx)),
             )
             .child(div().flex_1())
-            .child(div().p(space::s4()).text_size(text::caption()).text_color(c.text_faint).child("来源：本地书库"))
+            .child(self.source_selector(cx))
+    }
+
+    fn source_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let c = colors();
+        let sources: Vec<(&'static str, &'static str)> =
+            AppState::get(cx).registry.all().iter().map(|s| (s.meta().key, s.meta().name)).collect();
+        div()
+            .px(space::s2())
+            .pb(space::s3())
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .child(
+                div().px(space::s3()).pb(space::s1()).text_size(text::caption()).text_color(c.text_faint).child("来源"),
+            )
+            .children(sources.into_iter().map(|(key, name)| {
+                let selected = self.source == key && self.stack.is_empty();
+                div()
+                    .id(SharedString::from(format!("src-{key}")))
+                    .flex()
+                    .items_center()
+                    .h(size::segment_h())
+                    .px(space::s3())
+                    .rounded(radius::sm())
+                    .text_size(text::small())
+                    .cursor_pointer()
+                    .when(selected, |d| d.bg(c.surface_hover).text_color(c.text).font_weight(FontWeight::MEDIUM))
+                    .when(!selected, |d| d.text_color(c.text_muted).hover(|s| s.text_color(c.text)))
+                    .child(name)
+                    .on_click(cx.listener(move |this, _, _, cx| this.select_source(key, cx)))
+            }))
     }
 }
 

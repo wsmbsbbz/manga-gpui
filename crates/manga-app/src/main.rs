@@ -24,6 +24,13 @@ fn main() {
         }
 
         views::reader::bind_keys(cx);
+        // Single-window app: quit once the last window closes.
+        cx.on_window_closed(|cx, _| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         cx.set_menus(vec![Menu {

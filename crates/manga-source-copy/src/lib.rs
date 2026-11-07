@@ -29,6 +29,7 @@ pub const KEY: &str = "copy_manga";
 
 /// Default API host. Mirrors change; override with `MANGA_COPY_API` or config.
 pub const DEFAULT_API: &str = "api.copy2000.online";
+const BOOTSTRAP_URL: &str = "https://api.copy-manga.com/api/v3/system/network2?platform=3";
 const PAGE_SIZE: u64 = 30;
 const CHAPTER_PAGE: u64 = 100;
 /// Keep remote browsing bounded; search is the real discovery tool.
@@ -44,6 +45,7 @@ pub struct CopySource {
     token: Option<String>,
     region: String,
     quality: String,
+    initialized: Arc<futures::lock::Mutex<bool>>,
 }
 
 impl CopySource {
@@ -72,6 +74,7 @@ impl CopySource {
             token,
             region: "0".to_string(),
             quality: "1500".to_string(),
+            initialized: Arc::default(),
         }
     }
 
@@ -83,6 +86,8 @@ impl CopySource {
             device: self.device.clone(),
             token: self.token.clone(),
             region: self.region.clone(),
+            initialized: self.initialized.clone(),
+            bootstrap_url: BOOTSTRAP_URL.into(),
         }
     }
 
@@ -102,35 +107,54 @@ struct Ctx {
     device: Device,
     token: Option<String>,
     region: String,
+    initialized: Arc<futures::lock::Mutex<bool>>,
+    bootstrap_url: Arc<str>,
 }
 
 impl Ctx {
     /// GET `path` (relative to the API base), returning `results`.
     async fn get(&self, path: String) -> Result<Value> {
+        {
+            let mut initialized = self.initialized.lock().await;
+            if !*initialized {
+                // Venera initializes the app API before browsing with this identity.
+                self.request(&self.bootstrap_url).await?;
+                *initialized = true;
+            }
+        }
         let url = format!("{}{}", self.base, path);
+        self.request(&url).await
+    }
+
+    async fn request(&self, url: &str) -> Result<Value> {
         let headers = sign::headers(&self.device, self.token.as_deref(), &self.region);
-        let mut rb = self.client.get(&url);
+        let mut rb = self.client.get(url);
         for (k, v) in &headers {
             rb = rb.header(k, v);
         }
         let resp = rb.send().await.map_err(|e| SourceError::Network(e.to_string()))?;
         let code = resp.status().as_u16();
+        let retry_after =
+            resp.headers().get(reqwest::header::RETRY_AFTER).and_then(|h| h.to_str().ok()).map(str::to_owned);
         let body = resp.bytes().await.map_err(|e| SourceError::Network(e.to_string()))?;
-        match code {
-            200 => {
-                let v: Value = serde_json::from_slice(&body).map_err(|e| SourceError::Parse(e.to_string()))?;
-                results_of(v)
-            }
-            // "Expected available in N seconds".
-            210 => Err(SourceError::RateLimited(extract_wait(&String::from_utf8_lossy(&body)).unwrap_or(40))),
-            401 => Err(SourceError::LoginRequired),
-            404 => Err(SourceError::NotFound(url)),
-            other => Err(SourceError::Network(format!("HTTP {other}"))),
-        }
+        decode_response(code, retry_after.as_deref(), &body, url)
     }
 }
 
-fn results_of(v: Value) -> Result<Value> {
+fn decode_response(code: u16, retry_after: Option<&str>, body: &[u8], url: &str) -> Result<Value> {
+    if code == 200 {
+        let v = serde_json::from_slice(body).map_err(|e| SourceError::Parse(e.to_string()))?;
+        return results_of(v, retry_after, url);
+    }
+    let v = serde_json::from_slice(body).unwrap_or(Value::Null);
+    Err(response_error(code as u64, &v, retry_after, url))
+}
+
+fn results_of(v: Value, retry_after: Option<&str>, url: &str) -> Result<Value> {
+    // Error envelopes can contain `results.detail`; it is not successful data.
+    if let Some(code) = v.get("code").and_then(Value::as_u64).filter(|&code| code != 200) {
+        return Err(response_error(code, &v, retry_after, url));
+    }
     if let Some(r) = v.get("results").filter(|r| !r.is_null()) {
         return Ok(r.clone());
     }
@@ -138,11 +162,48 @@ fn results_of(v: Value) -> Result<Value> {
     Err(SourceError::Other(msg))
 }
 
+fn response_error(code: u64, v: &Value, retry_after: Option<&str>, url: &str) -> SourceError {
+    let msg = v
+        .pointer("/results/detail")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| v.get("message").and_then(Value::as_str).filter(|s| !s.trim().is_empty()));
+    match code {
+        210 | 429 => {
+            // 210 also means client restrictions; never invent a cooldown.
+            let wait = if code == 429 {
+                retry_after.and_then(|s| {
+                    s.parse::<u64>().ok().or_else(|| {
+                        let date = chrono::DateTime::parse_from_rfc2822(s).ok()?;
+                        Some((date.timestamp() - chrono::Utc::now().timestamp()).max(0) as u64)
+                    })
+                })
+            } else {
+                None
+            };
+            if let Some(wait) = wait.or_else(|| msg.and_then(extract_wait)) {
+                SourceError::RateLimited(wait)
+            } else {
+                SourceError::Other(format!(
+                    "{}：{}",
+                    if code == 429 { "请求过于频繁" } else { "站点拒绝请求（210）" },
+                    msg.unwrap_or("服务端未提供具体原因，请稍后手动重试")
+                ))
+            }
+        }
+        401 => SourceError::LoginRequired,
+        404 => SourceError::NotFound(if url.is_empty() { msg.unwrap_or("接口资源").into() } else { url.into() }),
+        _ => match msg {
+            Some(msg) => SourceError::Other(msg.into()),
+            None => SourceError::Network(format!("HTTP {code}")),
+        },
+    }
+}
+
 fn extract_wait(body: &str) -> Option<u64> {
-    let i = body.find("in ")? + 3;
-    let rest = &body[i..];
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse().ok()
+    let rest = body.split_once("Expected available in ")?.1;
+    let end = rest.find(|c: char| !c.is_ascii_digit())?;
+    rest[end..].starts_with(" seconds").then(|| rest[..end].parse().ok()).flatten()
 }
 
 async fn load_chapters(ctx: &Ctx, comic_id: &str, groups: &[(String, String)]) -> Result<Vec<ChapterGroup>> {
@@ -246,16 +307,185 @@ fn urlencode(s: &str) -> String {
 mod tests {
     use super::*;
 
+    fn mock_api(responses: Vec<(u16, &'static str)>) -> (Ctx, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            for (status, body) in responses {
+                let mut socket = loop {
+                    match listener.accept() {
+                        Ok((socket, _)) => break socket,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            if std::time::Instant::now() >= deadline {
+                                return requests;
+                            }
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(e) => panic!("mock accept: {e}"),
+                    }
+                };
+                socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0; 1024];
+                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let n = socket.read(&mut buf).unwrap();
+                    assert!(n > 0);
+                    request.extend_from_slice(&buf[..n]);
+                }
+                requests.push(String::from_utf8(request).unwrap());
+                write!(socket, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            requests
+        });
+        let ctx = Ctx {
+            client: reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(2)).build().unwrap(),
+            bootstrap_url: format!("{base}/bootstrap").into(),
+            base: base.into(),
+            device: Device::generate(),
+            token: None,
+            region: "0".into(),
+            initialized: Arc::default(),
+        };
+        (ctx, server)
+    }
+
+    #[test]
+    fn initializes_once_before_concurrent_api_requests_with_same_identity() {
+        const OK: &str = r#"{"code":200,"results":{}}"#;
+        let (ctx, server) = mock_api(vec![(200, OK); 3]);
+        let other = ctx.clone();
+        let rt = Runtime::new().unwrap();
+        let (a, b) = futures::executor::block_on(
+            rt.spawn(async move { futures::join!(ctx.get("/detail".into()), other.get("/chapters".into())) }),
+        )
+        .unwrap();
+        assert!(a.is_ok() && b.is_ok());
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[0].starts_with("GET /bootstrap "));
+        for path in ["/detail", "/chapters"] {
+            assert!(requests[1..].iter().any(|r| r.starts_with(&format!("GET {path} "))));
+        }
+        for key in ["device", "deviceinfo", "pseudoid", "authorization", "region"] {
+            let header = |request: &String| {
+                request
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case(key).then(|| value.trim().to_owned())
+                    })
+                    .unwrap()
+            };
+            assert!(requests.iter().all(|r| header(r) == header(&requests[0])), "changed {key}");
+        }
+    }
+
+    #[test]
+    fn failed_initialization_blocks_api_and_can_be_retried() {
+        const OK: &str = r#"{"code":200,"results":{}}"#;
+        let (ctx, server) = mock_api(vec![(503, "unavailable"), (200, OK), (200, OK)]);
+        let rt = Runtime::new().unwrap();
+        futures::executor::block_on(rt.spawn(async move {
+            assert!(ctx.get("/detail".into()).await.is_err());
+            assert!(ctx.get("/detail".into()).await.is_ok());
+        }))
+        .unwrap();
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[0].starts_with("GET /bootstrap "));
+        assert!(requests[1].starts_with("GET /bootstrap "));
+        assert!(requests[2].starts_with("GET /detail "));
+    }
+
     #[test]
     fn extract_wait_parses_message() {
         assert_eq!(extract_wait("Expected available in 37 seconds"), Some(37));
         assert_eq!(extract_wait("no number here"), None);
+        assert_eq!(extract_wait("Expected available in 37 minutes"), None);
+        assert_eq!(extract_wait("Something in 37 seconds"), None);
     }
 
     #[test]
     fn results_of_reports_message_on_missing() {
-        let err = results_of(serde_json::json!({"code": 400, "message": "参数错误"})).unwrap_err();
+        let err = results_of(serde_json::json!({"code": 400, "message": "参数错误"}), None, "").unwrap_err();
         assert!(matches!(err, SourceError::Other(m) if m == "参数错误"));
+    }
+
+    #[test]
+    fn results_of_rejects_business_error_with_results() {
+        let err = results_of(
+            serde_json::json!({
+                "code": 210,
+                "message": "請到官網更新最新APP，安裝正版之後等待1小時",
+                "results": {"detail": "請到官網更新最新APP，安裝正版之後等待1小時"}
+            }),
+            None,
+            "",
+        )
+        .unwrap_err();
+        assert!(matches!(err, SourceError::Other(m) if m.contains("等待1小時")));
+    }
+
+    #[test]
+    fn http_210_preserves_client_restriction_instead_of_default_wait() {
+        let body = serde_json::json!({
+            "code": 210,
+            "message": "請到官網更新最新APP(https://www.copy4000.com/download), 您或您身邊的人曾經下載過破解版本的拷貝漫畫，請下載安裝正版之後等待1小時，限制會自動解除。"
+        }).to_string();
+        let err = decode_response(210, Some("40"), body.as_bytes(), "https://example.test").unwrap_err();
+        assert!(matches!(err, SourceError::Other(m) if m.contains("等待1小時") && !m.contains("40 秒")));
+    }
+
+    #[test]
+    fn real_rate_limits_use_only_reported_wait_times() {
+        let body = br#"{"message":"Expected available in 37 seconds"}"#;
+        for code in [210, 429] {
+            assert!(matches!(decode_response(code, None, body, ""), Err(SourceError::RateLimited(37))));
+        }
+        assert!(matches!(decode_response(429, Some("61"), body, ""), Err(SourceError::RateLimited(61))));
+        assert!(matches!(
+            decode_response(429, Some("Wed, 21 Oct 2015 07:28:00 GMT"), b"", ""),
+            Err(SourceError::RateLimited(0))
+        ));
+        for code in [210, 429] {
+            assert!(matches!(decode_response(code, Some("invalid"), b"", ""), Err(SourceError::Other(_))));
+        }
+    }
+
+    #[test]
+    fn business_errors_preserve_http_response_context() {
+        assert!(matches!(
+            decode_response(200, Some("61"), br#"{"code":429,"message":"Too many requests"}"#, "comic-url"),
+            Err(SourceError::RateLimited(61))
+        ));
+        assert!(matches!(
+            decode_response(200, None, br#"{"code":404,"message":"Not found"}"#, "comic-url"),
+            Err(SourceError::NotFound(url)) if url == "comic-url"
+        ));
+    }
+
+    #[test]
+    fn decode_response_handles_success_and_business_errors() {
+        assert_eq!(
+            decode_response(200, None, br#"{"code":200,"results":{"list":[]}}"#, "").unwrap(),
+            serde_json::json!({"list":[]})
+        );
+        assert!(matches!(
+            decode_response(200, None, br#"{"code":401,"results":{"detail":"login"}}"#, ""),
+            Err(SourceError::LoginRequired)
+        ));
+        assert!(matches!(decode_response(401, None, b"", ""), Err(SourceError::LoginRequired)));
+        assert!(
+            matches!(decode_response(404, None, b"", "comic-url"), Err(SourceError::NotFound(m)) if m == "comic-url")
+        );
+        assert!(
+            matches!(decode_response(503, None, b"unavailable", ""), Err(SourceError::Network(m)) if m == "HTTP 503")
+        );
+        assert!(matches!(decode_response(200, None, b"invalid-json", ""), Err(SourceError::Parse(_))));
     }
 
     #[test]

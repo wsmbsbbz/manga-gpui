@@ -44,6 +44,8 @@ MANGA_LIBRARY=/tmp/demo-library cargo run
 
 左下角「来源」选「拷贝漫画」。书架显示最近更新（最多 5 页），用搜索查找具体作品。实现范围：浏览 / 搜索 / 详情 / 阅读；登录和收藏未实现。API 域名默认 `api.copy2000.online`，失效时用 `MANGA_COPY_API` 或配置文件 `copy_api_host` 指定新镜像。请求签名方案见 [`crates/manga-source-copy/src/sign.rs`](crates/manga-source-copy/src/sign.rs) 顶部说明。
 
+首次访问前，会用同一设备标识向 `api.copy-manga.com` 的 `/api/v3/system/network2?platform=3` 初始化一次，并发请求等待初始化完成；初始化失败可重试。覆盖 API 域名不会改变此初始化地址。HTTP 210 会保留服务端拒绝说明，仅在明确给出限流等待时间时显示秒数。
+
 ## 阅读器
 
 模式：条漫连续滚动、单页左→右、单页右→左。阅读模式会记住。

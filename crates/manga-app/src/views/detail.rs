@@ -42,6 +42,7 @@ impl DetailView {
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
+        self.error = None;
         let Some(source) = AppState::source(cx, &self.source) else {
             self.error = Some("来源不可用".into());
             return;
@@ -134,6 +135,18 @@ impl Render for DetailView {
             );
         } else if let Some(e) = &self.error {
             info = info.child(div().text_color(c.danger).text_size(text::body()).child(e.clone()));
+            let mut actions = div().flex().gap(space::s2()).child(ui::button("retry-detail", "重试").on_click(
+                cx.listener(|this, _, _, cx| {
+                    this.load(cx);
+                    cx.notify();
+                }),
+            ));
+            if self.source == manga_source_copy::KEY {
+                let url = format!("https://www.copy4000.com/comic/{}", self.comic.id);
+                actions = actions
+                    .child(ui::button("open-official", "在官网打开").on_click(move |_, _, cx| cx.open_url(&url)));
+            }
+            info = info.child(actions);
         } else {
             info = info.child(ui::spinner_label("加载中…"));
         }

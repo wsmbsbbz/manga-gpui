@@ -1,0 +1,18 @@
+[package]
+name = "manga-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+manga-core.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+futures.workspace = true
+bytes.workspace = true
+parking_lot.workspace = true
+zip.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

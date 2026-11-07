@@ -1,0 +1,43 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+default-members = ["crates/manga-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+manga-core = { path = "crates/manga-core" }
+manga-net = { path = "crates/manga-net" }
+manga-store = { path = "crates/manga-store" }
+manga-source-local = { path = "crates/manga-source-local" }
+
+# UI: pinned exactly; gpui-kit pins its gpui-pre-* family.
+gpui-kit = "=0.9.0"
+
+anyhow = "1"
+thiserror = "2"
+futures = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "fs", "time", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+dirs = "5"
+parking_lot = "0.12"
+log = "0.4"
+env_logger = "0.11"
+tempfile = "3"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

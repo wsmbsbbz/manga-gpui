@@ -1,0 +1,43 @@
+# Rust
+/target/
+**/*.rs.bk
+*.profraw
+*.profdata
+flamegraph.svg
+perf.data*
+
+# Cargo.lock is committed on purpose (binary application).
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.zed/
+
+# Local environment & secrets
+.env
+.env.*
+
+# Runtime data that must never be committed (app writes these to
+# ~/Library/…, but guard against copies dropped in the repo)
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+config.json
+*.log
+
+# Generated demo library (`cargo run --example gen_demo -- demo-library`)
+/demo-library/
+
+# Claude Code local settings
+.claude/settings.local.json

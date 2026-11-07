@@ -1,0 +1,19 @@
+[package]
+name = "manga-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+manga-core.workspace = true
+rusqlite.workspace = true
+sha2.workspace = true
+bytes.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

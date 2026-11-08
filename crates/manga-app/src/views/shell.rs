@@ -201,7 +201,11 @@ impl Shell {
                     .gap(space::s2())
                     .child(div().size(size::dot()).rounded(radius::full()).bg(c.accent))
                     .child(
-                        div().text_size(text::title()).font_weight(FontWeight::BOLD).text_color(c.text).child("Manga"),
+                        div()
+                            .text_size(text::title())
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(c.text)
+                            .child("Manga GPUI"),
                     ),
             )
             .child(

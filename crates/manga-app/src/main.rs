@@ -34,7 +34,9 @@ fn main() {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         cx.set_menus(vec![Menu {
-            name: "Manga".into(), items: vec![MenuItem::action("退出", Quit)], disabled: false
+            name: "Manga GPUI".into(),
+            items: vec![MenuItem::action("退出", Quit)],
+            disabled: false,
         }]);
 
         let bounds = Bounds::centered(None, size(px(1280.), px(860.)), cx);
@@ -42,7 +44,7 @@ fn main() {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(760.), px(520.))),
             titlebar: Some(TitlebarOptions {
-                title: Some("Manga".into()),
+                title: Some("Manga GPUI".into()),
                 appears_transparent: true,
                 traffic_light_position: Some(point(px(14.), px(14.))),
             }),

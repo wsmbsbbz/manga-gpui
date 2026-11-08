@@ -1,4 +1,4 @@
-# manga-gpui
+# Manga GPUI
 
 用 [gpui-kit](https://github.com/longbridge/gpui-kit)（GPUI）写的桌面漫画阅读器。支持本地书库和拷贝漫画站点源，左下角「来源」切换。站点源通过 `ComicSource` trait 接入。
 
@@ -9,6 +9,19 @@
 ```bash
 cargo run --release
 ```
+
+### macOS 应用包
+
+需要完整 Xcode 26+（`xcode-select -p` 应指向该 Xcode 的 Developer 目录）和 Rust 工具链：
+
+```bash
+./scripts/package-macos.sh
+open "target/release/bundle/Manga GPUI.app"
+```
+
+脚本为当前 Mac 架构构建 release，将程序和图标装配为 **Manga GPUI.app**，完成本地 ad-hoc 签名后才替换上一次产物。应用版本来自 Cargo；最低系统版本取自编译后二进制，不代表已经验证所有旧系统。产物可复制到「应用程序」目录使用；本地签名不等于 Developer ID 签名或公证。
+
+图标源位于 [`assets/macos/AppIcon.icon`](assets/macos/AppIcon.icon)，使用同一个幽灵读漫画前景，提供暖杏浅色和暖炭深色背景。macOS 26+ 根据系统的图标样式设置选择外观；该设置与窗口深浅色外观独立。旧系统使用编译器生成的兼容静态图标，需在对应系统单独验证。普通 `cargo run` 不加载应用包图标，查看正式图标请启动 `.app`。应用界面目前仍是深色主题。
 
 首次启动点「选择文件夹」指定书库。目录约定：
 

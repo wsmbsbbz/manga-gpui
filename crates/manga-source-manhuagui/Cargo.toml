@@ -1,0 +1,16 @@
+[package]
+name = "manga-source-manhuagui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+manga-core.workspace = true
+manga-net.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+log.workspace = true
+tokio.workspace = true
+scraper = "0.29"

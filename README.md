@@ -36,7 +36,7 @@ MANGA_LIBRARY=/tmp/demo-library cargo run
 | `MANGA_LIBRARY` | 覆盖已保存的书库路径 |
 | `MANGA_READER_MODE` | `scroll` / `ltr` / `rtl` |
 | `MANGA_DEBUG_ROUTE` | 启动时直接打开页面：`<漫画>`、`<漫画>/<章节>/<页>`，或 `@history`、`@search`（`<漫画>` 取当前来源） |
-| `MANGA_SOURCE` | 启动时选中的来源：`local` / `copy_manga` |
+| `MANGA_SOURCE` | 启动时选中的来源：`local` / `copy_manga` / `manhuagui` |
 | `MANGA_COPY_API` | 覆盖拷贝漫画 API 域名（镜像会变） |
 | `MANGA_COPY_TOKEN` | 可选，已有的登录 token（本应用不实现登录流程） |
 
@@ -45,6 +45,12 @@ MANGA_LIBRARY=/tmp/demo-library cargo run
 左下角「来源」选「拷贝漫画」。书架显示最近更新（最多 5 页），用搜索查找具体作品。实现范围：浏览 / 搜索 / 详情 / 阅读；登录和收藏未实现。API 域名默认 `api.copy2000.online`，失效时用 `MANGA_COPY_API` 或配置文件 `copy_api_host` 指定新镜像。请求签名方案见 [`crates/manga-source-copy/src/sign.rs`](crates/manga-source-copy/src/sign.rs) 顶部说明。
 
 首次访问前，会用同一设备标识向 `api.copy-manga.com` 的 `/api/v3/system/network2?platform=3` 初始化一次，并发请求等待初始化完成；初始化失败可重试。覆盖 API 域名不会改变此初始化地址。HTTP 210 会保留服务端拒绝说明，仅在明确给出限流等待时间时显示秒数。
+
+### 漫画柜源
+
+左下角「来源」选「漫画柜」。书架显示最近更新（`/list/update_pN.html`，最多 5 页），搜索走 `/s/<关键词>_pN.html`。实现范围：浏览 / 搜索 / 详情（多分组：单话、单行本、番外等）/ 阅读；登录、收藏、评论未实现。解析公开网页 HTML，章节页的图片列表藏在打包脚本里，由 [`unpack.rs`](crates/manga-source-manhuagui/src/unpack.rs) 以纯数据方式解码（LZString 关键字表 + 标识符替换），不执行任何 JavaScript。
+
+漫画柜会封禁访问过快的 IP，因此所有网页请求串行、间隔至少 0.8 秒；HTTP 403/429 会提示“可能访问过快”。图片 CDN（`i.hamreus.com`）要求 `Referer: https://www.manhuagui.com/`，请求时自动附带。手动联网检查：`cargo run -p manga-source-manhuagui --example live`。
 
 ## 阅读器
 

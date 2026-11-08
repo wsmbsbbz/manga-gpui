@@ -141,8 +141,14 @@ impl Render for DetailView {
                     cx.notify();
                 }),
             ));
-            if self.source == manga_source_copy::KEY {
-                let url = format!("https://www.copy4000.com/comic/{}", self.comic.id);
+            let official = match self.source.as_str() {
+                manga_source_copy::KEY => Some(format!("https://www.copy4000.com/comic/{}", self.comic.id)),
+                manga_source_manhuagui::KEY => {
+                    Some(format!("{}/comic/{}/", manga_source_manhuagui::BASE, self.comic.id))
+                }
+                _ => None,
+            };
+            if let Some(url) = official {
                 actions = actions
                     .child(ui::button("open-official", "在官网打开").on_click(move |_, _, cx| cx.open_url(&url)));
             }

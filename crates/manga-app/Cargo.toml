@@ -14,6 +14,7 @@ manga-net.workspace = true
 manga-store.workspace = true
 manga-source-local.workspace = true
 manga-source-copy.workspace = true
+manga-source-manhuagui.workspace = true
 gpui-kit.workspace = true
 image.workspace = true
 futures.workspace = true

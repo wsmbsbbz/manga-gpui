@@ -14,6 +14,7 @@ manga-net = { path = "crates/manga-net" }
 manga-store = { path = "crates/manga-store" }
 manga-source-local = { path = "crates/manga-source-local" }
 manga-source-copy = { path = "crates/manga-source-copy" }
+manga-source-manhuagui = { path = "crates/manga-source-manhuagui" }
 
 # UI: pinned exactly; gpui-kit pins its gpui-pre-* family.
 gpui-kit = "=0.9.0"

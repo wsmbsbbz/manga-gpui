@@ -5,6 +5,7 @@ use manga_core::{ComicSource, SourceRegistry};
 use manga_net::{ImageFetcher, Runtime};
 use manga_source_copy::CopySource;
 use manga_source_local::LocalSource;
+use manga_source_manhuagui::ManHuaGuiSource;
 use manga_store::{AppConfig, DiskCache, History, HistoryEntry, app_dirs};
 
 use crate::images::ImagePipeline;
@@ -62,6 +63,9 @@ impl AppState {
         let copy_token = std::env::var("MANGA_COPY_TOKEN").ok();
         let copy = Arc::new(CopySource::new(runtime.clone(), copy_host, copy_token));
         registry.register(copy as Arc<dyn ComicSource>);
+
+        // ManHuaGui website source (unofficial, reads public HTML pages).
+        registry.register(Arc::new(ManHuaGuiSource::new(runtime.clone())) as Arc<dyn ComicSource>);
 
         let mb = 1024 * 1024;
         let covers = cx.new(|_| ImagePipeline::new(fetcher.clone(), 420, 96 * mb));
